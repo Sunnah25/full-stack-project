@@ -458,11 +458,196 @@ def generate_data():
 
 users_list, all_reservations, lot_prices = generate_data()
 
-with open('users_raw.json', 'w') as fout:
+def generate_parking_lots(all_reservations, lot_prices):
+    parking_lots = []
+
+    # Group reservations by parking lot for faster lookup.
+    reservations_by_lot = {
+        pid: [] for pid in parking_lot_ids
+    }
+
+    for reservation in all_reservations:
+        reservations_by_lot[reservation["parking_id"]].append(
+            reservation
+        )
+
+    # Track administrators assigned to each parking lot.
+    for i, parking_id in enumerate(parking_lot_ids):
+
+        lot_reservations = reservations_by_lot[parking_id]
+
+        # Randomly assign 1 or more administrators to each lot.
+        num_admins = random.randint(1, len(admins_ids))
+        admin_indices = random.sample(
+            range(len(admins_ids)), num_admins
+        )
+
+        administrators = [
+            {
+                "user_id": admins_ids[a],
+                "name": users[a]
+            }
+            for a in admin_indices
+        ]
+
+        # Parking capacity.
+        total_spaces = random.randint(100, 200)
+
+        # Latest update time.
+        updated_at = to_text(NOW)
+
+        # Determine vehicles inside at a particular time.
+        def vehicles_inside_at(timestamp):
+            vehicles = {}
+
+            for reservation in lot_reservations:
+                for session in reservation["sessions"]:
+                    for movement in session["movements"]:
+                        check_in = movement["check_in_time"]
+                        check_out = movement["check_out_time"]
+
+                        if check_in is None or check_in > timestamp:
+                            continue
+
+                        if check_out is None or check_out > timestamp:
+                            vehicles[reservation["reservation_id"]] = {
+                                "reservation_id": reservation["reservation_id"],
+                                "vehicle_number": reservation["vehicle_number"]
+                            }
+
+            return list(vehicles.values())
+
+        # Current occupancy.
+        vehicles_inside = vehicles_inside_at(updated_at)
+        occupied_spaces = min(len(vehicles_inside), total_spaces)
+        num_available_spaces = total_spaces - occupied_spaces
+
+        # Income from completed reservations only.
+        total_income = 0.0
+        completed_reservations = 0
+
+        for reservation in lot_reservations:
+            if reservation["status"] == "completed":
+                completed_reservations += 1
+
+                for session in reservation["sessions"]:
+                    if session["total_cost"] is not None:
+                        total_income += session["total_cost"]
+
+        # Availability history: six hours ago and now.
+        availability_history = []
+
+        for hours_ago in [6, 0]:
+            history_time = NOW - timedelta(hours=hours_ago)
+            history_timestamp = to_text(history_time)
+
+            historical_vehicles = vehicles_inside_at(
+                history_timestamp
+            )
+
+            historical_occupied = min(
+                len(historical_vehicles), total_spaces
+            )
+
+            availability_history.append({
+                "updated_at": history_timestamp,
+                "num_available_spaces": (
+                    total_spaces - historical_occupied
+                ),
+                "vehicles_inside": historical_vehicles
+            })
+
+        # Build reservations using exactly the requested fields.
+        reservations = []
+
+        for r in lot_reservations:
+            reservations.append({
+                "reservation_id": r["reservation_id"],
+                "user_id": r["user_id"],
+                "vehicle_number": r["vehicle_number"],
+                "start_time": r["start_time"],
+                "end_time": r["end_time"],
+                "status": r["status"],
+                "created_at": r["created_at"],
+                "sessions": [
+                    {
+                        "session_id": s["session_id"],
+                        "total_cost": s["total_cost"],
+                        "movements": [
+                            {
+                                "check_in_time": m["check_in_time"],
+                                "check_out_time": m["check_out_time"]
+                            }
+                            for m in s["movements"]
+                        ]
+                    }
+                    for s in r["sessions"]
+                ]
+            })
+
+        # Construct the parking lot document.
+        parking_lot = {
+            "parking_id": f"P{i + 1:04d}",
+
+            "address": {
+                "street": streets[i],
+                "city": cities[i % len(cities)],
+                "postcode": postcodes[i]
+            },
+
+            "location": {
+                "type": "Point",
+                "coordinates": [
+                    longitudes[i],
+                    latitudes[i]
+                ]
+            },
+
+            "total_spaces": total_spaces,
+            "num_available_spaces": num_available_spaces,
+            "updated_at": updated_at,
+            "price_per_hour": lot_prices[parking_id],
+
+            "administrators": administrators,
+            "reservations": reservations,
+
+            "income": {
+                "total_income": round(total_income, 2),
+                "completed_reservations": completed_reservations,
+                "updated_at": updated_at
+            },
+
+            "availability_history": availability_history
+        }
+
+        parking_lots.append(parking_lot)
+
+    return parking_lots
+
+
+# ==========================================
+# GENERATE ALL DATA AND SAVE JSON FILES
+# ==========================================
+
+users_list, all_reservations, lot_prices = generate_data()
+
+with open("users_raw.json", "w", encoding="utf-8") as fout:
     json.dump(users_list, fout, indent=4)
 
-# saved for the parking_lots file, so both files match
-with open('reservations_flat.json', 'w') as fout:
+with open("reservations_flat.json", "w", encoding="utf-8") as fout:
     json.dump(all_reservations, fout, indent=4)
-with open('lot_prices.json', 'w') as fout:
+
+with open("lot_prices.json", "w", encoding="utf-8") as fout:
     json.dump(lot_prices, fout, indent=4)
+
+parking_lots = generate_parking_lots(
+    all_reservations,
+    lot_prices
+)
+
+with open("parking_lots.json", "w", encoding="utf-8") as fout:
+    json.dump(parking_lots, fout, indent=4)
+
+print("All JSON files generated successfully.")
+print(f"Parking lots generated: {len(parking_lots)}")
+print("Output: parking_lots.json")
