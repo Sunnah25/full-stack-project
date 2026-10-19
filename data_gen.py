@@ -59,9 +59,7 @@ streets = [
 ]
 
 districts = ["SW1", "SW3", "SW7", "W1", "W2", "WC1", "WC2", "EC1", "EC2", "E1", "E2", "SE1", "N1", "NW1"]
-postcodes = [
-    f"{districts[i % len(districts)]} {1 + i // len(districts)}AA" for i in range(100)
-]
+postcodes = [f"{districts[i % len(districts)]} {1 + i // len(districts)}AA" for i in range(100)]
 
 latitudes = [
     51.5074, 51.5155, 51.5033, 51.5090, 51.5200,
@@ -110,7 +108,8 @@ longitudes = [
 ]
 
 
-NOW = datetime(2026, 10, 15, 12, 0)          # the "current time" of our fake data
+# Demo current time
+NOW = datetime(2026, 10, 15, 12, 0)          
 TODAY = NOW.replace(hour=0, minute=0)
 
 passwords = ['Pass@123', 'Secure#456', 'Park!789', 'Car$2026', 'Lot&Key01']
@@ -127,9 +126,9 @@ def to_text(dt):
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-# ==========================================
+
+
 # PARKING LOTS (basic part: price, spaces, admins)
-# ==========================================
 def create_parking_lots():
     parking_lots = []
     for i in range(100):
@@ -179,15 +178,29 @@ def assign_admins(parking_lots):
     return admin_lots
 
 
-# ==========================================
+
+
+
+
+
+
+
+
+
+
 # USERS
-# ==========================================
+
 def generate_users(parking_lots):
     users_list = []
     reservation_number = 0
     session_number = 0
+    
+    
 
-    # =============== USERS: 4 nested loops ===============
+    # USERS: 4 nested loops 
+    
+    
+    
     # LOOP 1: users
     for i in range(70):
         email = normal_users_ids[i]
@@ -306,9 +319,25 @@ def generate_users(parking_lots):
     return users_list
 
 
-# ==========================================
+
+
+
+
+
+
+
+
+
 # PARKING LOTS (last part: availability and income)
-# ==========================================
+
+
+
+
+
+
+
+
+
 def vehicles_inside_at(lot, timestamp):
     vehicles = []
     for reservation in lot["reservations"]:
@@ -353,13 +382,18 @@ def finish_parking_lots(parking_lots):
         }
 
 
-# ==========================================
+
 # ADMINS
-# ==========================================
 def generate_admins(admin_lots):
     admins_list = []
 
-    # =============== ADMINS ===============
+
+
+    #  ADMINS 
+    
+    
+    
+    
     # LOOP 1: admins
     for i in range(30):
         managed_parking_lots = []
@@ -382,9 +416,9 @@ def generate_admins(admin_lots):
     return admins_list
 
 
-# ==========================================
+
+
 # GENERATE ALL DATA AND SAVE JSON FILES
-# ==========================================
 parking_lots = create_parking_lots()
 admin_lots = assign_admins(parking_lots)
 users_list = generate_users(parking_lots)
@@ -397,6 +431,3 @@ with open("users.json", "w", encoding="utf-8") as fout:
 with open("parking_lots.json", "w", encoding="utf-8") as fout:
     json.dump(parking_lots, fout, indent=4)
 
-print("All JSON files generated successfully.")
-print(f"Users generated: {len(users_list) + len(admins_list)}")
-print(f"Parking lots generated: {len(parking_lots)}")
