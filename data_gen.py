@@ -114,8 +114,8 @@ TODAY = NOW.replace(hour=0, minute=0)
 
 passwords = ['Pass@123', 'Secure#456', 'Park!789', 'Car$2026', 'Lot&Key01']
 statuses = ['completed', 'pending', 'active', 'cancelled']
-start_hours = [6, 7, 8, 9, 10]               # every day of a reservation starts at this hour...
-end_hours = [14, 15, 16, 17, 18]             # ...and ends at this hour
+start_hours = [6, 7, 8, 9, 10]               # every day of a reservation starts at this hour
+end_hours = [14, 15, 16, 17, 18]             # ends at this hour
 checkin_delays = [0, 2, 5, 6, 10, 15]        # minutes after start
 checkout_delays = [-20, -10, 0, 5, 20]       # minutes around end
 
@@ -128,9 +128,10 @@ def to_text(dt):
 
 
 
-# PARKING LOTS (basic part: price, spaces, admins)
+# PARKING LOTS (price, spaces and admins)
 def create_parking_lots():
     parking_lots = []
+    
     for i in range(100):
         parking_lots.append({
             "parking_id": parking_lot_ids[i],
@@ -152,13 +153,18 @@ def create_parking_lots():
             "income": None,                        # filled in at the end
             "availability_history": []             # filled in at the end
         })
+        
     return parking_lots
 
 
+
+
+
 def assign_admins(parking_lots):
-    # each parking lot gets 1 to 3 admins, each admin gets 1 to 5 parking lots
+
     admin_lots = {admin_id: [] for admin_id in admins_ids}
 
+    #Link admins to each lot
     def link(lot, i):
         lot["administrators"].append({"user_id": admins_ids[i], "name": users[i]})
         admin_lots[admins_ids[i]].append(lot)
@@ -167,10 +173,10 @@ def assign_admins(parking_lots):
     for n, lot in enumerate(parking_lots):
         link(lot, n % 30)
 
-    # 0, 1 or 2 extra admins per lot, only if that admin has less than 5 lots
+    # 0, 1 or 2 extra admins per lot, only if that admin has less lots (for this dataset I used 5)
     for lot in parking_lots:
         extra = random.choices([0, 1, 2], [60, 30, 10])[0]
-        taken = [a["user_id"] for a in lot["administrators"]]
+        taken = [admin["user_id"] for admin in lot["administrators"]]
         free = [i for i in range(30) if admins_ids[i] not in taken and len(admin_lots[admins_ids[i]]) < 5]
         for i in random.sample(free, min(extra, len(free))):
             link(lot, i)
@@ -209,12 +215,14 @@ def generate_users(parking_lots):
         reservation_details = []
         user_statuses = []
 
-        # LOOP 2: reservations of this user (0 to 5)
+        # LOOP 2: reservations of this user (I kept it up to 5 for this dataset)
         for slot in range(random.randint(0, 5)):
             status = random.choice(statuses)
+            
             # active and pending can happen only once for each user
             if status in ('active', 'pending') and status in user_statuses:
                 status = random.choice(['completed', 'cancelled'])
+                
             user_statuses.append(status)
 
             num_days = random.randint(1, 3)
@@ -241,6 +249,7 @@ def generate_users(parking_lots):
             sessions = []     # stays empty for pending and cancelled
 
             if status == 'completed' or status == 'active':
+                
                 # LOOP 3: sessions (one per day)
                 for d in range(num_days):
                     day = first_day + timedelta(days=d)
@@ -256,6 +265,7 @@ def generate_users(parking_lots):
 
                     movements = []
                     total_hours = 0
+
 
                     # LOOP 4: movements (check-in / check-out)
                     for m in range(how_many):
@@ -418,7 +428,7 @@ def generate_admins(admin_lots):
 
 
 
-# GENERATE ALL DATA AND SAVE JSON FILES
+# Generate the dataset and save in json files
 parking_lots = create_parking_lots()
 admin_lots = assign_admins(parking_lots)
 users_list = generate_users(parking_lots)
