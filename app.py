@@ -1,12 +1,3 @@
-"""
-Smart Parking Management System API (Flask + MongoDB)
-
-Data model (see users.json and parking_lots.json):
-  - users: role "user" has reservation_details, role "admin" has managed_parking_lots
-  - parking_lots: reservations, income and availability_history live inside each lot
-  - every reservation is stored in THREE places (user, lot, admin reference),
-    so any change goes through update_everywhere() to keep them in sync.
-"""
 import hashlib
 import os
 from datetime import datetime, timedelta, timezone
@@ -16,11 +7,13 @@ from math import cos, radians
 import jwt
 from flask import Flask, jsonify, make_response, request
 from pymongo import MongoClient
+from dotenv import load_dotenv
 
+load_dotenv()
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "mysecret")
+app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
 
-# ---------------------------------------------------------------- database
+# database 
 client = MongoClient("mongodb://localhost:27017")
 db = client.ParkingDB
 users = db.users
@@ -31,7 +24,7 @@ parking_lots.create_index([("location", "2dsphere")])
 
 API = "/api/v1.0"
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
-FREE_STATUSES = ["cancelled", "rejected"]  # these reservations do not use a space
+FREE_STATUSES = ["cancelled", "rejected"]
 ALL_STATUSES = ["pending", "approved", "rejected", "active", "completed", "cancelled"]
 LOT_FIELDS = ["street", "city", "postcode", "latitude", "longitude",
               "total_spaces", "price_per_hour"]
@@ -39,7 +32,7 @@ LOT_SUMMARY = ["parking_id", "address", "location", "total_spaces",
                "num_available_spaces", "updated_at", "price_per_hour"]
 
 
-# ----------------------------------------------------------------- helpers
+# helper functions
 def error(message, code):
     return make_response(jsonify({"error": message}), code)
 
@@ -53,7 +46,7 @@ def now_str():
 
 
 def parse_time(text):
-    """ISO string -> timezone-aware datetime (raises ValueError if invalid)."""
+    #ISO string = timezone aware datetime (raises ValueError if invalid)
     value = datetime.fromisoformat(text.replace("Z", "+00:00"))
     if value.tzinfo is None:
         raise ValueError("timezone missing")
@@ -65,12 +58,11 @@ def hash_password(password):
 
 
 def find_item(items, key, value):
-    """First dict in a list where item[key] == value, else None."""
+    #First dict in a list where item[key] == value, else None.
     return next((item for item in items if item[key] == value), None)
 
 
 def get_paging():
-    """Read ?pn= and ?ps=. Raises ValueError if they are not positive numbers."""
     page = int(request.args.get("pn", 1))
     size = int(request.args.get("ps", 10))
     if page < 1 or size < 1:
@@ -79,14 +71,12 @@ def get_paging():
 
 
 def distance_km(lat1, lng1, lat2, lng2):
-    """Approximate distance (flat-earth) - fine for city-sized searches."""
     dy = (lat2 - lat1) * 111
     dx = (lng2 - lng1) * 111 * cos(radians(lat1))
     return (dx ** 2 + dy ** 2) ** 0.5
 
 
 def read_location():
-    """Read lat, lng and radius from the query string. Returns (lat, lng, radius, error)."""
     try:
         lat = float(request.args["lat"])
         lng = float(request.args["lng"])
@@ -99,7 +89,6 @@ def read_location():
 
 
 def next_id(prefix, width, existing_ids):
-    """P0001 / R000001 / S000001 style ids: highest existing number + 1."""
     highest = max((int(i[1:]) for i in existing_ids), default=0)
     return prefix + str(highest + 1).zfill(width)
 
@@ -110,7 +99,6 @@ def all_reservations():
 
 
 def count_taken(lot, start, end, ignore_id=None):
-    """How many reservations in this lot overlap the time window."""
     taken = 0
     for r in lot.get("reservations", []):
         if r["reservation_id"] == ignore_id or r["status"] in FREE_STATUSES:
@@ -129,7 +117,6 @@ def managed_ids(admin):
 
 
 def save_availability(parking_id, total_spaces, inside, now, extra=None):
-    """Update free spaces and add a new availability_history entry."""
     free = total_spaces - len(inside)
     fields = {"num_available_spaces": free, "updated_at": now, **(extra or {})}
     parking_lots.update_one(
@@ -142,61 +129,89 @@ def save_availability(parking_id, total_spaces, inside, now, extra=None):
 
 
 def update_everywhere(reservation_id, user_id, parking_id, changes):
-    """Apply the same changes to the reservation's three copies."""
     def build(prefix):
         return {prefix + key: value for key, value in changes.items()}
 
-    # 1. the user's own copy
+    # 1 user data
     users.update_one(
         {"user_id": user_id, "reservation_details.reservation_id": reservation_id},
         {"$set": build("reservation_details.$.")})
-    # 2. the parking lot's copy
+    
+    # 2 parking lot data
     parking_lots.update_one(
         {"parking_id": parking_id, "reservations.reservation_id": reservation_id},
         {"$set": build("reservations.$.")})
-    # 3. the copy kept by every admin who manages this lot
+    
+    # 3 admin's data
     users.update_many(
         {"role": "admin", "managed_parking_lots.parking_id": parking_id},
         {"$set": build("managed_parking_lots.$[m].reservation_refs.$[r].")},
         array_filters=[{"m.parking_id": parking_id}, {"r.reservation_id": reservation_id}])
 
 
-# -------------------------------------------------------------------- auth
+
+
+
+
+
+
+
+
+
+# -------------------------- auth ------------------------------------------
+
+
+
+#Check the JWT, load the user, check the role.
+
 def login_required(role=None):
-    """Check the JWT, load the user and (optionally) check the role.
-    The user document is passed to the view as its first argument."""
     def decorator(view):
         @wraps(view)
         def wrapper(*args, **kwargs):
             auth = request.headers.get("Authorization", "")
+            
             if not auth.startswith("Bearer "):
                 return error("Token required", 401)
+            
             try:
                 data = jwt.decode(auth.split(" ", 1)[1],
                                   app.config["SECRET_KEY"], algorithms=["HS256"])
+                
             except jwt.ExpiredSignatureError:
                 return error("Token expired", 401)
+            
             except jwt.InvalidTokenError:
                 return error("Invalid token", 401)
 
             user = users.find_one({"user_id": data.get("user_id")})
+            
             if user is None:
                 return error("User not found", 404)
+            
             if role and user["role"] != role:
                 return error(role.capitalize() + " access only", 403)
+            
             return view(user, *args, **kwargs)
+        
         return wrapper
+    
     return decorator
 
 
-# ------------------------------------------------------------ welcome route
-@app.route("/")
+
+
+
+
+# ---------------------------- welcome route --------------------------------
+@app.route("/", methods = ['GET'])
 def index():
     return make_response("<h1>Smart Parking Management System API</h1>", 200)
 
 
-# ------------------------------------------------------------- guest routes
-@app.route(API + "/parking_lots")
+# --------------------------- guest routes ----------------------------------
+
+#1. View parking lots
+@app.route(API + "/parking_lots", methods = ['GET'])
 def show_all_parking_lots():
     try:
         page, size = get_paging()
@@ -207,19 +222,24 @@ def show_all_parking_lots():
     return reply([{field: lot[field] for field in LOT_SUMMARY} for lot in lots])
 
 
-@app.route(API + "/parking_lots/<parking_id>")
+# 2. View one specific parking lot
+@app.route(API + "/parking_lots/<parking_id>", methods = ['GET'])
 def show_one_parking_lot(parking_id):
+    
     # hide private data (other drivers' reservations, income, vehicle numbers)
     lot = parking_lots.find_one(
         {"parking_id": parking_id},
         {"_id": 0, "reservations": 0, "income": 0, "availability_history": 0})
+    
     if lot is None:
         return error("Invalid parking lot ID", 404)
     return reply(lot)
 
 
+
+# 3. Search parking lot
 # Example: /parking_lots/search?lat=51.51&lng=-0.13&start=2026-11-01T09:00:00Z&end=2026-11-01T12:00:00Z
-@app.route(API + "/parking_lots/search")
+@app.route(API + "/parking_lots/search", methods = ['GET'])
 def search_parking():
     if not all(key in request.args for key in ["lat", "lng", "start", "end"]):
         return error("Missing required parameters", 400)
@@ -254,14 +274,21 @@ def search_parking():
     return reply(results)
 
 
-# --------------------------------------------------------- register / login
+
+
+# ------------------------- register / login --------------------------------
+
+# 4. Register
 @app.route(API + "/auth/register", methods=["POST"])
 def register():
     name, email, password = (request.values.get(k) for k in ["name", "email", "password"])
+    
     if not (name and email and password):
         return error("Missing from data", 400)
+    
     if "@" not in email or len(password) < 6:
         return error("Invalid email, or password shorter than 6 characters", 400)
+    
     if users.find_one({"user_id": email}) is not None:
         return error("This email is already registered", 409)
 
@@ -271,16 +298,20 @@ def register():
         "name": name,
         "password_hash": hash_password(password),
         "reservation_details": []})
+    
     return reply({"message": "User registered", "user_id": email}, 201)
 
 
+# 5. Login
 @app.route(API + "/auth/login", methods=["POST"])
 def login():
     email, password = request.values.get("email"), request.values.get("password")
+    
     if not (email and password):
         return error("Missing required fields", 400)
 
     user = users.find_one({"user_id": email})
+    
     if user is None or user["password_hash"] != hash_password(password):
         return error("Wrong email or password", 401)
 
@@ -289,42 +320,54 @@ def login():
          "role": user["role"],
          "exp": datetime.now(timezone.utc) + timedelta(minutes=30)},
         app.config["SECRET_KEY"], algorithm="HS256")
+    
     return reply({"message": "Login successful", "token": token,
                   "user_id": user["user_id"], "role": user["role"]})
 
 
-@app.route(API + "/auth/me")
+# 6. view own data
+@app.route(API + "/auth/me", methods = ['GET'])
 @login_required()
 def me(user):
     account = {"user_id": user["user_id"], "name": user["name"], "role": user["role"]}
+    
     if user["role"] == "admin":
         account["managed_parking_lots"] = managed_ids(user)
+        
     return reply(account)
 
 
-# ------------------------------------------------------- user: reservations
+# 7. user: submit a reservation request
 @app.route(API + "/me/reservations", methods=["POST"])
 @login_required("user")
 def add_reservation(user):
+    
     fields = ["parking_id", "vehicle_number", "start_time", "end_time"]
+    
     if not all(request.values.get(k) for k in fields):
         return error("Missing required fields", 400)
+    
     parking_id, vehicle, start, end = (request.values[k] for k in fields)
 
     lot = parking_lots.find_one({"parking_id": parking_id})
+    
     if lot is None:
         return error("Invalid parking lot ID", 404)
 
     try:
         start_dt, end_dt = parse_time(start), parse_time(end)
+        
     except ValueError:
         return error("Invalid date/time format", 400)
+    
     now = datetime.now(timezone.utc)
+    
     if start_dt <= now or end_dt <= start_dt:
         return error("Invalid reservation time", 400)
 
     if any(r["status"] == "pending" for r in user.get("reservation_details", [])):
         return error("You already have a pending reservation", 409)
+    
     if count_taken(lot, start_dt, end_dt) >= lot["total_spaces"]:
         return error("No free space at that time", 409)
 
@@ -338,12 +381,15 @@ def add_reservation(user):
         "status": "pending",
         "created_at": now.strftime(TIME_FORMAT),
         "sessions": []}
+    
     lot_copy = {**reservation, "user_id": user["user_id"]}
 
     users.update_one({"user_id": user["user_id"]},
                      {"$push": {"reservation_details": reservation}})
+    
     parking_lots.update_one({"parking_id": parking_id},
                             {"$push": {"reservations": lot_copy}})
+    
     users.update_many(
         {"role": "admin", "managed_parking_lots.parking_id": parking_id},
         {"$push": {"managed_parking_lots.$[m].reservation_refs": lot_copy}},
@@ -353,39 +399,45 @@ def add_reservation(user):
                   "url": request.host_url + "api/v1.0/me/reservations/" + reservation_id}, 201)
 
 
-# "/reservations/me" is the old path, kept so existing clients still work
-@app.route(API + "/me/reservations")
-@app.route(API + "/reservations/me")
+# 8. view own reservations
+@app.route(API + "/me/reservations", methods = ['GET'])
 @login_required("user")
 def show_my_reservations(user):
     reservations = user.get("reservation_details", [])
     status = request.args.get("status")
+    
     if status:
         if status not in ALL_STATUSES:
             return reply({"error": "Invalid status", "allowed_statuses": ALL_STATUSES}, 400)
+        
         reservations = [r for r in reservations if r["status"] == status]
     return reply(reservations)
 
 
-@app.route(API + "/me/reservations/<reservation_id>")
+# 9. view one specific own reservation
+@app.route(API + "/me/reservations/<reservation_id>", methods = ['GET'])
 @login_required("user")
 def show_one_reservation(user, reservation_id):
     reservation = find_item(user.get("reservation_details", []), "reservation_id", reservation_id)
+    
     if reservation is None:
         return error("Invalid reservation ID", 404)
     return reply(reservation)
 
 
-@app.route(API + "/reservations/<reservation_id>", methods=["PUT"])
+# 10. update reservation
+@app.route(API + "/me/reservations/<reservation_id>", methods=["PUT"])
 @login_required("user")
 def update_reservation(user, reservation_id):
     reservation = find_item(user.get("reservation_details", []), "reservation_id", reservation_id)
+    
     if reservation is None:
         return error("Invalid reservation ID", 404)
 
     vehicle = request.values.get("vehicle_number")
     start = request.values.get("start_time")
     end = request.values.get("end_time")
+    
     if vehicle is None and start is None and end is None:
         return error("No update details provided", 400)
     if vehicle is not None and not vehicle.strip():
@@ -423,10 +475,12 @@ def update_reservation(user, reservation_id):
                   "url": request.host_url + "api/v1.0/me/reservations/" + reservation_id})
 
 
+# 11. Cancel reservation
 @app.route(API + "/reservations/<reservation_id>/cancel", methods=["PUT"])
 @login_required("user")
 def cancel_reservation(user, reservation_id):
     reservation = find_item(user.get("reservation_details", []), "reservation_id", reservation_id)
+    
     if reservation is None:
         return error("Invalid reservation ID", 404)
     if reservation["status"] not in ["pending", "approved"]:
@@ -437,9 +491,15 @@ def cancel_reservation(user, reservation_id):
     return reply({"message": "Reservation cancelled", "status": "cancelled"})
 
 
-# ------------------------------------------- check-in / check-out (shared)
+
+
+
+
+
+# --------------------- check-in and check-out ----------------------
 def start_session(reservation, owner):
-    """Check a vehicle in. Returns (session, None) or (None, error_response)."""
+    
+    #Check a vehicle in. Returns (session, None) or (None, error_response).
     if reservation["status"] != "approved":
         return None, error("Only an approved reservation can be checked in", 409)
     if any(r["status"] == "active" for r in owner.get("reservation_details", [])):
@@ -472,7 +532,8 @@ def start_session(reservation, owner):
 
 
 def end_session(reservation, user_id):
-    """Check a vehicle out and charge for it. Returns (session, None) or (None, error_response)."""
+    
+    #Check a vehicle out and charge for it. Returns (session, None) or (None, error_response).
     if reservation["status"] != "active":
         return None, error("Only an active reservation can be checked out", 409)
 
@@ -512,9 +573,8 @@ def end_session(reservation, user_id):
     return session, None
 
 
-# "/sessions/<id>/check-in" is the old path (the id is a reservation id), kept as an alias
-@app.route(API + "/reservations/<reservation_id>/check-in", methods=["POST"])
-@app.route(API + "/sessions/<reservation_id>/check-in", methods=["POST"])
+# 12. Check in
+@app.route(API + "me/reservations/<reservation_id>/sessions/<session_id>/check-in", methods=["POST"])
 @login_required("user")
 def check_in(user, reservation_id):
     reservation = find_item(user.get("reservation_details", []), "reservation_id", reservation_id)
@@ -527,8 +587,8 @@ def check_in(user, reservation_id):
     return reply({"message": "Checked in successfully", "session": session}, 201)
 
 
-@app.route(API + "/reservations/<reservation_id>/check-out", methods=["POST"])
-@app.route(API + "/sessions/<reservation_id>/check-out", methods=["POST"])
+#13. Check out
+@app.route(API + "me/reservations/<reservation_id>/sessions/<session_id>/check-out", methods=["POST"])
 @login_required("user")
 def check_out(user, reservation_id):
     reservation = find_item(user.get("reservation_details", []), "reservation_id", reservation_id)
@@ -541,7 +601,8 @@ def check_out(user, reservation_id):
     return reply({"message": "Checked out successfully", "session": session})
 
 
-@app.route(API + "/sessions/history")
+# 14. view session history
+@app.route(API + "me/reservations/<reservation_id>/sessions/history", methods= ['GET'])
 @login_required("user")
 def sessions_history(user):
     history = []
@@ -556,8 +617,8 @@ def sessions_history(user):
     return reply(history)
 
 
-# Example: /recommendations?lat=51.51&lng=-0.13&radius=5
-@app.route(API + "/recommendations")
+# 15. get recommendat lots: /recommendations?lat=51.51&lng=-0.13&radius=5
+@app.route(API + "/me/recommendations", methods= ["GET"])
 @login_required()
 def recommendations(user):
     lat, lng, radius, problem = read_location()
@@ -597,10 +658,12 @@ def recommendations(user):
     return reply(results[:5])
 
 
-# ---------------------------------------------------------- admin: lots
+# -------------------------- admin: lots --------------------------------
+
+#Merge the request values over current, convert and validate them. and Returns (values, None) or (None, error_response)
+
 def read_lot_form(current):
-    """Merge the request values over `current`, convert and validate them.
-    Returns (values, None) or (None, error_response)."""
+
     values = {f: request.values.get(f, current.get(f)) for f in LOT_FIELDS}
     for field, value in values.items():
         if value in (None, ""):
@@ -623,9 +686,9 @@ def read_lot_form(current):
         return None, error("Total spaces must be between 6 and 30", 400)
     return values, None
 
-
+#Find a lot and make sure this admin manages it. Returns (lot, error_response)
 def get_managed_lot(admin, parking_id):
-    """Find a lot and make sure this admin manages it. Returns (lot, error_response)."""
+
     lot = parking_lots.find_one({"parking_id": parking_id})
     if lot is None:
         return None, error("Invalid parking lot ID", 404)
@@ -634,6 +697,7 @@ def get_managed_lot(admin, parking_id):
     return lot, None
 
 
+# 16. admin: parking lots addings
 @app.route(API + "/parking_lots", methods=["POST"])
 @login_required("admin")
 def add_parking_lot(admin):
@@ -670,6 +734,7 @@ def add_parking_lot(admin):
                   "url": request.host_url + "api/v1.0/parking_lots/" + new_id}, 201)
 
 
+#17. update parking lot
 @app.route(API + "/parking_lots/<parking_id>", methods=["PUT"])
 @login_required("admin")
 def edit_parking_lot(admin, parking_id):
@@ -702,6 +767,7 @@ def edit_parking_lot(admin, parking_id):
                   "url": request.host_url + "api/v1.0/parking_lots/" + parking_id})
 
 
+# 18. Delete lot
 @app.route(API + "/parking_lots/<parking_id>", methods=["DELETE"])
 @login_required("admin")
 def delete_parking_lot(admin, parking_id):
@@ -717,7 +783,7 @@ def delete_parking_lot(admin, parking_id):
     return reply({"message": "Parking lot deleted successfully"})
 
 
-# ----------------------------------------------------- admin: reservations
+# ------------------------- admin: reservations ----------------------------
 def get_managed_reservation(admin, reservation_id):
     """Find a reservation inside the lots. Returns (lot, reservation, error_response)."""
     lot = parking_lots.find_one({"reservations.reservation_id": reservation_id})
@@ -728,7 +794,7 @@ def get_managed_reservation(admin, reservation_id):
     return lot, find_item(lot["reservations"], "reservation_id", reservation_id), None
 
 
-# Example: /admin/reservations?status=pending&parking_id=P0001&pn=1&ps=10
+# 19. admin: view reservations
 @app.route(API + "/admin/reservations")
 @login_required("admin")
 def admin_show_reservations(admin):
@@ -753,6 +819,7 @@ def admin_show_reservations(admin):
     return reply(reservations[start:start + size])
 
 
+# 20. admin: update one specefic reservation
 @app.route(API + "/admin/reservations/<reservation_id>", methods=["PUT"])
 @login_required("admin")
 def admin_update_reservation(admin, reservation_id):
@@ -785,6 +852,7 @@ def admin_update_reservation(admin, reservation_id):
                   "reservation_id": reservation_id, "changes": changes})
 
 
+# 21. check-in management
 @app.route(API + "/admin/reservations/<reservation_id>/check-in", methods=["POST"])
 @login_required("admin")
 def admin_check_in(admin, reservation_id):
@@ -801,9 +869,8 @@ def admin_check_in(admin, reservation_id):
     return reply({"message": "Vehicle checked in by admin", "session": session}, 201)
 
 
-# "/admin/sessions/<id>/check-out" is the old path, kept as an alias
+# 22. checkout management
 @app.route(API + "/admin/reservations/<reservation_id>/check-out", methods=["POST"])
-@app.route(API + "/admin/sessions/<reservation_id>/check-out", methods=["POST"])
 @login_required("admin")
 def admin_check_out(admin, reservation_id):
     _, reservation, problem = get_managed_reservation(admin, reservation_id)
@@ -816,8 +883,8 @@ def admin_check_out(admin, reservation_id):
     return reply({"message": "Parking session completed by admin", "session": session})
 
 
-# ------------------------------------------------ admin: occupancy / revenue
-@app.route(API + "/admin/occupancy")
+# 23. admin: occupancy
+@app.route(API + "/admin/occupancy", methods= ["GET"])
 @login_required("admin")
 def occupancy(admin):
     results = []
@@ -833,7 +900,8 @@ def occupancy(admin):
     return reply(results)
 
 
-@app.route(API + "/admin/revenue")
+#24. admin: revenue
+@app.route(API + "/admin/revenue", methods= ["GET"])
 @login_required("admin")
 def revenue(admin):
     by_lot = [{"parking_id": lot["parking_id"],
