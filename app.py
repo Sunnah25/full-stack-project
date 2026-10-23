@@ -476,7 +476,7 @@ def update_reservation(user, reservation_id):
 
 
 # 11. Cancel reservation
-@app.route(API + "/reservations/<reservation_id>/cancel", methods=["PUT"])
+@app.route(API + "/me/reservations/<reservation_id>/cancel", methods=["PUT"])
 @login_required("user")
 def cancel_reservation(user, reservation_id):
     reservation = find_item(user.get("reservation_details", []), "reservation_id", reservation_id)
@@ -531,50 +531,88 @@ def start_session(reservation, owner):
     return session, None
 
 
-def end_session(reservation, user_id):
-    
-    #Check a vehicle out and charge for it. Returns (session, None) or (None, error_response).
-    if reservation["status"] != "active":
-        return None, error("Only an active reservation can be checked out", 409)
 
-    lot = parking_lots.find_one({"parking_id": reservation["parking_id"]})
+def end_session(reservation, user_id, session_id):
+    if reservation["status"] != "active":
+        return None, error(
+            "Only an active reservation can be checked out", 409
+        )
+
+    lot = parking_lots.find_one(
+        {"parking_id": reservation["parking_id"]}
+    )
     if lot is None:
         return None, error("Parking lot not found", 404)
 
     sessions = reservation.get("sessions", [])
-    if not sessions:
-        return None, error("No parking session found", 409)
-    session = sessions[-1]
+    session = next(
+        (s for s in sessions if s["session_id"] == session_id),
+        None
+    )
+    if session is None:
+        return None, error("Invalid session ID", 404)
+
     movements = session.get("movements", [])
     if not movements:
         return None, error("No parking movements found", 409)
+
     if movements[-1]["check_out_time"] is not None:
         return None, error("This session has already been checked out", 409)
 
-    # close the open movement, then add up the time spent in the lot
     now = now_str()
     seconds = 0
+
     for movement in movements:
-        movement["check_out_time"] = movement["check_out_time"] or now
-        seconds += (parse_time(movement["check_out_time"])
-                    - parse_time(movement["check_in_time"])).total_seconds()
-    session["total_cost"] = round(seconds / 3600 * lot["price_per_hour"], 2)
+        if movement["check_out_time"] is None:
+            movement["check_out_time"] = now
 
-    update_everywhere(reservation["reservation_id"], user_id, lot["parking_id"],
-                      {"status": "completed", "sessions": sessions})
+        seconds += (
+            parse_time(movement["check_out_time"])
+            - parse_time(movement["check_in_time"])
+        ).total_seconds()
 
-    inside = [v for v in vehicles_inside(lot)
-              if v["reservation_id"] != reservation["reservation_id"]]
+    session["total_cost"] = round(
+        seconds / 3600 * lot["price_per_hour"], 2
+    )
+
+    update_everywhere(
+        reservation["reservation_id"],
+        user_id,
+        lot["parking_id"],
+        {
+            "status": "completed",
+            "sessions": sessions
+        }
+    )
+
+    inside = [
+        v for v in vehicles_inside(lot)
+        if v["reservation_id"] != reservation["reservation_id"]
+    ]
+
     earned = sum(s["total_cost"] or 0 for s in sessions)
-    save_availability(lot["parking_id"], lot["total_spaces"], inside, now, {
-        "income.total_income": round(lot["income"]["total_income"] + earned, 2),
-        "income.completed_reservations": lot["income"]["completed_reservations"] + 1,
-        "income.updated_at": now})
+
+    save_availability(
+        lot["parking_id"],
+        lot["total_spaces"],
+        inside,
+        now,
+        {
+            "income.total_income": round(
+                lot["income"]["total_income"] + earned, 2
+            ),
+            "income.completed_reservations":
+                lot["income"]["completed_reservations"] + 1,
+            "income.updated_at": now
+        }
+    )
+
     return session, None
 
 
+
 # 12. Check in
-@app.route(API + "me/reservations/<reservation_id>/sessions/<session_id>/check-in", methods=["POST"])
+@app.route(API + "/me/reservations/<reservation_id>/sessions/check-in", methods=["POST"])
 @login_required("user")
 def check_in(user, reservation_id):
     reservation = find_item(user.get("reservation_details", []), "reservation_id", reservation_id)
@@ -588,32 +626,54 @@ def check_in(user, reservation_id):
 
 
 #13. Check out
-@app.route(API + "me/reservations/<reservation_id>/sessions/<session_id>/check-out", methods=["POST"])
+@app.route(API + "/me/reservations/<reservation_id>/sessions/<session_id>/check-out", methods=["POST"])
 @login_required("user")
-def check_out(user, reservation_id):
+def check_out(user, reservation_id, session_id):
     reservation = find_item(user.get("reservation_details", []), "reservation_id", reservation_id)
     if reservation is None:
         return error("Invalid reservation ID", 404)
+    
 
-    session, problem = end_session(reservation, user["user_id"])
+    session = next(
+        (s for s in reservation.get("sessions", [])
+         if s["session_id"] == session_id),
+        None
+    )
+
+
+    if session is None:
+        return error("Invalid session ID", 404)
+
+
+    session, problem = end_session(reservation, user["user_id"], session_id)
     if problem:
         return problem
     return reply({"message": "Checked out successfully", "session": session})
 
 
 # 14. view session history
-@app.route(API + "me/reservations/<reservation_id>/sessions/history", methods= ['GET'])
+@app.route(API + "/me/reservations/<reservation_id>/sessions/history", methods= ['GET'])
 @login_required("user")
-def sessions_history(user):
+def sessions_history(user, reservation_id):
     history = []
-    for reservation in user.get("reservation_details", []):
-        for session in reservation.get("sessions", []):
-            history.append({
-                "reservation_id": reservation["reservation_id"],
-                "parking_id": reservation["parking_id"],
-                "session_id": session["session_id"],
-                "total_cost": session["total_cost"],
-                "movements": session["movements"]})
+    reservation = find_item(
+        user.get("reservation_details", []),
+        "reservation_id",
+        reservation_id
+    )
+
+    if reservation is None:
+        return error("Invalid reservation ID", 404)
+
+    for session in reservation.get("sessions", []):
+        history.append({
+            "reservation_id": reservation["reservation_id"],
+            "parking_id": reservation["parking_id"],
+            "session_id": session["session_id"],
+            "total_cost": session["total_cost"],
+            "movements": session["movements"]
+        })
+
     return reply(history)
 
 
@@ -704,8 +764,8 @@ def add_parking_lot(admin):
     values, problem = read_lot_form({})
     if problem:
         return problem
-    if len(managed_ids(admin)) >= 5:
-        return error("An admin can manage at most 5 parking lots", 409)
+    if len(managed_ids(admin)) >= 7:
+        return error("An admin can manage at most 7 parking lots", 409)
 
     new_id = next_id("P", 4, [lot["parking_id"] for lot in parking_lots.find({}, {"parking_id": 1})])
     now = now_str()
@@ -784,46 +844,138 @@ def delete_parking_lot(admin, parking_id):
 
 
 # ------------------------- admin: reservations ----------------------------
-def get_managed_reservation(admin, reservation_id):
-    """Find a reservation inside the lots. Returns (lot, reservation, error_response)."""
-    lot = parking_lots.find_one({"reservations.reservation_id": reservation_id})
+def get_managed_reservation(admin, reservation_id, parking_id):
+    #Find a reservation inside the lots. Returns (lot, reservation, error_response).
+
+    lot = parking_lots.find_one({"parking_id": parking_id})
+
     if lot is None:
+        return None, None, error("Invalid parking lot ID", 404)
+
+    if parking_id not in managed_ids(admin):
+        return None, None, error(
+            "You do not manage this parking lot", 403
+        )
+
+    reservation = find_item(
+        lot.get("reservations", []),
+        "reservation_id",
+        reservation_id
+    )
+
+    if reservation is None:
         return None, None, error("Invalid reservation ID", 404)
-    if lot["parking_id"] not in managed_ids(admin):
-        return None, None, error("You do not manage this parking lot", 403)
-    return lot, find_item(lot["reservations"], "reservation_id", reservation_id), None
+
+    return lot, reservation, None
+
+
+
+
+# ------- missed from proposal ----------
+
+# 25. Admin: view parking lots managed by the logged-in admin
+@app.route(API + "/admin/parking_lots", methods=["GET"])
+@login_required("admin")
+def admin_show_parking_lots(admin):
+    lot_ids = managed_ids(admin)
+
+    lots = parking_lots.find(
+        {"parking_id": {"$in": lot_ids}},
+        {
+            "_id": 0,
+            "parking_id": 1,
+            "address": 1,
+            "location": 1,
+            "total_spaces": 1,
+            "num_available_spaces": 1,
+            "updated_at": 1,
+            "price_per_hour": 1
+        }
+    ).sort("parking_id", 1)
+
+    return reply(list(lots))
+
+
+
+
+
+# 26. Admin: view one specific managed parking lot
+@app.route(API + "/admin/parking_lots/<parking_id>", methods=["GET"])
+@login_required("admin")
+def admin_show_one_parking_lot(admin, parking_id):
+    lot = parking_lots.find_one(
+        {"parking_id": parking_id},
+        {
+            "_id": 0,
+            "parking_id": 1,
+            "address": 1,
+            "location": 1,
+            "total_spaces": 1,
+            "num_available_spaces": 1,
+            "updated_at": 1,
+            "price_per_hour": 1
+        }
+    )
+
+    if lot is None:
+        return error("Invalid parking lot ID", 404)
+
+    if parking_id not in managed_ids(admin):
+        return error("You do not manage this parking lot", 403)
+
+    return reply(lot)
+
+
+
 
 
 # 19. admin: view reservations
-@app.route(API + "/admin/reservations")
+@app.route(API + "/admin/parking_lots/<parking_id>/reservations")
 @login_required("admin")
-def admin_show_reservations(admin):
+def admin_show_reservations(admin, parking_id):
+
+    lot = parking_lots.find_one({"parking_id": parking_id})
+
+    if lot is None:
+        return error("Invalid parking lot ID", 404)
+
+
+    if parking_id not in managed_ids(admin):
+        return error("You do not manage this parking lot", 403)
+
+    # Validate pagination
     try:
         page, size = get_paging()
     except ValueError:
         return error("pn and ps must be positive numbers", 400)
 
+
+    reservations = lot.get("reservations", [])
+
+
     status = request.args.get("status")
-    wanted_lot = request.args.get("parking_id")
+    if status:
+        if status not in ALL_STATUSES:
+            return reply({
+                "error": "Invalid status",
+                "allowed_statuses": ALL_STATUSES
+            }, 400)
 
-    reservations = []
-    for lot in parking_lots.find({"parking_id": {"$in": managed_ids(admin)}}):
-        for r in lot.get("reservations", []):
-            if status and r["status"] != status:
-                continue
-            if wanted_lot and r["parking_id"] != wanted_lot:
-                continue
-            reservations.append(r)
+        reservations = [
+            r for r in reservations
+            if r["status"] == status
+        ]
 
+    # Apply pagination
     start = (page - 1) * size
     return reply(reservations[start:start + size])
 
 
 # 20. admin: update one specefic reservation
-@app.route(API + "/admin/reservations/<reservation_id>", methods=["PUT"])
+@app.route(API + "/admin/parking_lots/<parking_id>/reservations/<reservation_id>", methods=["PUT"])
 @login_required("admin")
-def admin_update_reservation(admin, reservation_id):
-    _, reservation, problem = get_managed_reservation(admin, reservation_id)
+def admin_update_reservation(admin, reservation_id, parking_id):
+    _, reservation, problem = get_managed_reservation(admin, reservation_id, parking_id)
     if problem:
         return problem
 
@@ -853,12 +1005,14 @@ def admin_update_reservation(admin, reservation_id):
 
 
 # 21. check-in management
-@app.route(API + "/admin/reservations/<reservation_id>/check-in", methods=["POST"])
+@app.route(API + "/admin/parking_lots/<parking_id>/reservations/<reservation_id>/check-in", methods=["POST"])
 @login_required("admin")
-def admin_check_in(admin, reservation_id):
-    _, reservation, problem = get_managed_reservation(admin, reservation_id)
+def admin_check_in(admin, reservation_id, parking_id):
+    _, reservation, problem = get_managed_reservation(admin, reservation_id, parking_id)
     if problem:
         return problem
+
+    
     owner = users.find_one({"user_id": reservation["user_id"]})
     if owner is None:
         return error("Reservation owner not found", 404)
@@ -870,14 +1024,14 @@ def admin_check_in(admin, reservation_id):
 
 
 # 22. checkout management
-@app.route(API + "/admin/reservations/<reservation_id>/check-out", methods=["POST"])
+@app.route(API + "/admin/parking_lots/<parking_id>/reservations/<reservation_id>/sessions/<session_id>/check-out", methods=["POST"])
 @login_required("admin")
-def admin_check_out(admin, reservation_id):
-    _, reservation, problem = get_managed_reservation(admin, reservation_id)
+def admin_check_out(admin, reservation_id, session_id, parking_id):
+    _, reservation, problem = get_managed_reservation(admin, reservation_id, parking_id)
     if problem:
         return problem
 
-    session, problem = end_session(reservation, reservation["user_id"])
+    session, problem = end_session(reservation, reservation["user_id"], session_id)
     if problem:
         return problem
     return reply({"message": "Parking session completed by admin", "session": session})
