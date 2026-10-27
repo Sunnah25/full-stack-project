@@ -20,7 +20,6 @@ A RESTful API for parking reservation and management with **Flask** and **MongoD
 9. [Data model](#data-model)
 10. [Error handling](#error-handling)
 11. [Testing](#testing)
-12. [Known limitations](#known-limitations)
 
 
 ---
@@ -283,7 +282,7 @@ All paths are relative to `/api/v1.0`. Request bodies are **form data** (`applic
 | 19 | GET | `/admin/parking_lots/<parking_id>/reservations?status=&pn=&ps=` | Reservations for a managed lot. |
 | 20 | PUT | `/admin/parking_lots/<parking_id>/reservations/<reservation_id>` | `status` = `approved` or `rejected` (pending only) and/or `vehicle_number`. |
 | 21 | POST | `/admin/parking_lots/<parking_id>/reservations/<reservation_id>/check-in` | Check a vehicle in for the driver. |
-| 22 | POST | `/admin/parking_lots/<parking_id>/reservations/<reservation_id>/sessions/<session_id>/check-out` | Check a vehicle out. See the [note on this route](#known-limitations). |
+| 22 | POST | `/admin/parking_lots/<parking_id>/reservations/<reservation_id>/sessions/<session_id>/check-out` | Check a vehicle out. |
 | 23 | GET | `/admin/occupancy` | Per lot: `total_spaces`, `occupied_spaces`, `num_available_spaces`, `occupancy_rate` (%), `vehicles_inside`. |
 | 24 | GET | `/admin/revenue` | `total_revenue`, `completed_reservations` and a `by_parking_lot` breakdown. |
  
