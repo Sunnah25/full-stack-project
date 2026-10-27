@@ -4,7 +4,7 @@ import jwt
 from flask import Blueprint, current_app, request
 
 from auth_utils import login_required
-from extensions import users
+from extensions import blacklist, users
 from helpers import error, hash_password, managed_ids, reply
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/v1.0/auth")
@@ -37,14 +37,16 @@ def register():
 # 5. Login
 @auth_bp.route("/login", methods=["POST"])
 def login():
-    email, password = request.values.get("email"), request.values.get("password")
+    auth = request.authorization
 
-    if not (email and password):
-        return error("Missing required fields", 400)
 
-    user = users.find_one({"user_id": email})
+    if not auth or not auth.username or not auth.password:
+        return error("Basic authentication required", 401)
 
-    if user is None or user["password_hash"] != hash_password(password):
+
+    user = users.find_one({"user_id": auth.username})
+
+    if user is None or user["password_hash"] != hash_password(auth.password):
         return error("Wrong email or password", 401)
 
     token = jwt.encode(
@@ -67,3 +69,13 @@ def me(user):
         account["managed_parking_lots"] = managed_ids(user)
 
     return reply(account)
+
+
+# 27. Logout (the token is added to the blacklist and stops working)
+@auth_bp.route("/logout", methods=["GET"])
+@login_required()
+def logout(user):
+    token = request.headers.get("x-access-token")
+    blacklist.insert_one({"token": token})
+
+    return reply({"message": "Logout successful"})

@@ -3,22 +3,23 @@ from functools import wraps
 import jwt
 from flask import current_app, request
 
-from extensions import users
+from extensions import blacklist, users
 from helpers import error
 
 
-# Check the JWT, load the user, check the role.
+# Check the token, make sure it was not logged out, load the user, check the role.
 def login_required(role=None):
     def decorator(view):
         @wraps(view)
         def wrapper(*args, **kwargs):
-            auth = request.headers.get("Authorization", "")
+            token = request.headers.get("x-access-token")
 
-            if not auth.startswith("Bearer "):
+            if not token:
                 return error("Token required", 401)
 
+
             try:
-                data = jwt.decode(auth.split(" ", 1)[1],
+                data = jwt.decode(token,
                                   current_app.config["SECRET_KEY"],
                                   algorithms=["HS256"])
 
@@ -27,6 +28,9 @@ def login_required(role=None):
 
             except jwt.InvalidTokenError:
                 return error("Invalid token", 401)
+
+            if blacklist.find_one({"token": token}) is not None:
+                return error("Token has been logged out", 401)
 
             user = users.find_one({"user_id": data.get("user_id")})
 
