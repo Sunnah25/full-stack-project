@@ -1,0 +1,33 @@
+<nav class="navbar navbar-expand-md navbar-dark bg-primary sticky-top shadow-sm"
+     aria-label="Main navigation">
+  <div class="container">
+
+    <a class="navbar-brand fw-bold" routerLink="/" (click)="close()">🅿️ SmartPark</a>
+
+    <button class="navbar-toggler" type="button" (click)="toggle()"
+            [attr.aria-expanded]="menuOpen()" aria-controls="mainMenu"
+            aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="navbar-collapse collapse" [class.show]="menuOpen()" id="mainMenu">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item">
+          <a class="nav-link" routerLink="/" routerLinkActive="active"
+             [routerLinkActiveOptions]="{ exact: true }"
+             ariaCurrentWhenActive="page" (click)="close()">Home</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" routerLink="/lots" routerLinkActive="active"
+             ariaCurrentWhenActive="page" (click)="close()">Parking Lots</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" routerLink="/search" routerLinkActive="active"
+             ariaCurrentWhenActive="page" (click)="close()">Find a Space</a>
+        </li>
+      </ul>
+      <!-- Login / Register / user menu will be added here at the end -->
+    </div>
+
+  </div>
+</nav>

@@ -2,6 +2,7 @@ import os
 
 from dotenv import load_dotenv
 from flask import Flask, make_response
+from flask_cors import CORS
 
 from blueprints.admin import admin_bp
 from blueprints.auth import auth_bp
@@ -14,6 +15,7 @@ load_dotenv()
 
 def create_app():
     app = Flask(__name__)
+    CORS(app)
     app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
 
     for blueprint in (auth_bp, parking_lots_bp, reservations_bp,

@@ -1,0 +1,68 @@
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <h1 class="page-title mb-0">Parking Lots</h1>
+
+  <div class="d-flex align-items-center gap-2">
+    <label for="pageSize" class="form-label mb-0 text-muted">Show</label>
+    <select id="pageSize" class="form-select form-select-sm w-auto"
+            [value]="size()" (change)="changeSize($any($event.target).value)">
+      @for (opt of sizeOptions; track opt) {
+        <option [value]="opt" [selected]="opt === size()">{{ opt }} per page</option>
+      }
+    </select>
+  </div>
+</div>
+
+@if (loading()) {
+  <div class="text-center py-5" role="status" aria-live="polite">
+    <div class="spinner-border text-primary" aria-hidden="true"></div>
+    <p class="mt-3 text-muted">Loading parking lots…</p>
+  </div>
+} @else if (error()) {
+  <div class="alert alert-danger d-flex justify-content-between align-items-center" role="alert">
+    <span>{{ error() }}</span>
+    <button class="btn btn-outline-danger btn-sm" (click)="retry()">Try again</button>
+  </div>
+} @else if (lots().length === 0) {
+  <div class="text-center py-5 bg-white rounded-3 shadow-sm">
+    <p class="lead mb-3">No more parking lots to show.</p>
+    @if (page() > 1) {
+      <button class="btn btn-primary" (click)="goTo(1)">Back to first page</button>
+    }
+  </div>
+} @else {
+  <div class="row g-3">
+    @for (lot of lots(); track lot.parking_id) {
+      <div class="col-12 col-md-6 col-lg-4">
+        <a class="text-decoration-none text-reset d-block h-100"
+           [routerLink]="['/lots', lot.parking_id]"
+           [attr.aria-label]="'View details of ' + lot.address.street">
+          <div class="card h-100 shadow-sm card-hover">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start mb-2">
+                <span class="badge bg-secondary">{{ lot.parking_id }}</span>
+                <span class="badge" [class]="badgeClass(lot)">{{ badgeText(lot) }}</span>
+              </div>
+              <h2 class="h5 card-title mb-1">{{ lot.address.street }}</h2>
+              <p class="text-muted mb-3">{{ lot.address.city }}, {{ lot.address.postcode }}</p>
+
+              <div class="d-flex justify-content-between">
+                <span><strong>{{ lot.num_available_spaces }}</strong> / {{ lot.total_spaces }} spaces free</span>
+                <span class="fw-bold text-primary">{{ lot.price_per_hour | currency:'GBP' }}/hr</span>
+              </div>
+            </div>
+          </div>
+        </a>
+      </div>
+    }
+  </div>
+
+  <nav class="d-flex justify-content-between align-items-center mt-4" aria-label="Pagination">
+    <button class="btn btn-outline-primary" [disabled]="page() === 1" (click)="goTo(page() - 1)">
+      ← Previous
+    </button>
+    <span class="text-muted">Page {{ page() }}</span>
+    <button class="btn btn-outline-primary" [disabled]="!hasNext()" (click)="goTo(page() + 1)">
+      Next →
+    </button>
+  </nav>
+}

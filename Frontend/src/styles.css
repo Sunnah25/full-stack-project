@@ -1,1 +1,19 @@
 /* You can add global styles to this file, and also import other style files */
+
+body {
+  background-color: #f4f6f9;
+  color: #212529;
+}
+
+/* Clear keyboard focus on every interactive element */
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible {
+  outline: 3px solid #ffc107;
+  outline-offset: 2px;
+}
+
+/* Cards used for lists get a gentle hover so users know they are clickable */
+.card-hover { transition: transform .15s ease, box-shadow .15s ease; }
+.card-hover:hover { transform: translateY(-3px); box-shadow: 0 .5rem 1rem rgba(0,0,0,.15); }
+
+.page-title { font-weight: 700; margin-bottom: 1.5rem; }
